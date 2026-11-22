@@ -2,36 +2,33 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-import ta
-from ta.trend import MACD
-from ta.volatility import BollingerBands
-import math
+import plotly.express as px
+from ta.momentum import RSIIndicator
 
 st.set_page_config(
-    page_title="Stock Analyzer Pro",
+    page_title="Stock Analyzer V2",
     layout="wide"
 )
 
-# ---------------------------------------------------
+# =========================================
 # HELPERS
-# ---------------------------------------------------
+# =========================================
 
 def clean(x):
 
-    if x is None:
-        return None
-
     try:
+
+        if x is None:
+            return None
+
         if np.isnan(x):
             return None
-    except:
-        pass
 
-    try:
         return float(x)
+
     except:
+
         return None
 
 
@@ -43,39 +40,22 @@ def pct(x):
     return x * 100
 
 
-def show(x, p=False):
+def show(x, percent=False):
 
     if x is None:
         return "N/A"
 
-    if p:
+    if percent:
         return f"{x:.2f}%"
 
     return f"{x:.2f}"
 
 
-def human(n):
-
-    if n is None:
-        return "N/A"
-
-    if n > 1e12:
-        return f"{n/1e12:.2f}T"
-
-    if n > 1e9:
-        return f"{n/1e9:.2f}B"
-
-    if n > 1e6:
-        return f"{n/1e6:.2f}M"
-
-    return str(round(n))
-
-
-# ---------------------------------------------------
+# =========================================
 # DCF
-# ---------------------------------------------------
+# =========================================
 
-def dcf_model(
+def dcf_value(
     fcf,
     shares,
     growth,
@@ -85,9 +65,8 @@ def dcf_model(
 ):
 
     if (
-        fcf is None
-        or shares is None
-        or shares == 0
+        not fcf
+        or not shares
     ):
         return None
 
@@ -102,9 +81,14 @@ def dcf_model(
 
     current_fcf = fcf
 
-    for year in range(1, years + 1):
+    for year in range(
+        1,
+        years + 1
+    ):
 
-        current_fcf *= (1 + growth)
+        current_fcf *= (
+            1 + growth
+        )
 
         pv += (
             current_fcf
@@ -112,8 +96,9 @@ def dcf_model(
             ((1 + discount) ** year)
         )
 
-    terminal_fcf = current_fcf * (
-        1 + terminal
+    terminal_fcf = (
+        current_fcf
+        * (1 + terminal)
     )
 
     terminal_value = (
@@ -128,631 +113,608 @@ def dcf_model(
         ((1 + discount) ** years)
     )
 
-    total_value = pv + terminal_pv
+    total = (
+        pv + terminal_pv
+    )
 
-    return total_value / shares
+    return (
+        total / shares
+    )
 
 
-# ---------------------------------------------------
+# =========================================
 # SIDEBAR
-# ---------------------------------------------------
+# =========================================
 
-st.sidebar.title("DCF Settings")
+st.sidebar.header(
+    "DCF Settings"
+)
 
 growth = st.sidebar.slider(
-    "FCF Growth %",
-    0.0, 20.0, 8.0
+    "Growth %",
+    0.0,
+    20.0,
+    8.0
 )
 
 discount = st.sidebar.slider(
-    "Discount Rate %",
-    5.0, 20.0, 10.0
+    "Discount %",
+    5.0,
+    20.0,
+    10.0
 )
 
 terminal = st.sidebar.slider(
-    "Terminal Growth %",
-    0.0, 5.0, 2.5
+    "Terminal %",
+    0.0,
+    5.0,
+    2.5
 )
 
 years = st.sidebar.slider(
     "Years",
-    5, 15, 10
+    5,
+    15,
+    10
 )
 
-# ---------------------------------------------------
+# =========================================
 # INPUT
-# ---------------------------------------------------
+# =========================================
 
-st.title("📈 Stock Analyzer Pro")
+st.title(
+    "📈 Stock Analyzer V2"
+)
 
-ticker_input = st.text_input(
+ticker_symbol = st.text_input(
     "Ticker",
-    value="MSFT"
+    "MSFT"
 ).upper()
 
-if ticker_input:
+if not ticker_symbol:
 
-    try:
+    st.stop()
 
-        ticker = yf.Ticker(
-            ticker_input
+try:
+
+    ticker = yf.Ticker(
+        ticker_symbol
+    )
+
+    info = ticker.info
+
+    hist = ticker.history(
+        period="2y",
+        auto_adjust=True
+    )
+
+    if hist.empty:
+
+        st.error(
+            "No market data."
         )
 
-        info = ticker.info
+        st.stop()
 
-        hist = ticker.history(
-            period="2y",
-            auto_adjust=True
-        )
+    # =====================================
+    # TECHNICAL
+    # =====================================
 
-        if hist.empty:
-
-            st.error(
-                "No data found"
-            )
-
-            st.stop()
-
-        # TECHNICAL
-
-        hist["RSI"] = (
-            ta.momentum
-            .RSIIndicator(
-                hist["Close"]
-            )
-            .rsi()
-        )
-
-        macd_indicator = MACD(
+    hist["RSI"] = (
+        RSIIndicator(
             hist["Close"]
-        )
+        ).rsi()
+    )
 
-        hist["MACD"] = (
-          macd_indicator.macd()
-        )
+    hist["SMA50"] = (
+        hist["Close"]
+        .rolling(50)
+        .mean()
+    )
 
-        hist["MACD_SIGNAL"] = (
-         macd_indicator.macd_signal()
-        )
-        hist["SMA50"] = (
-            hist["Close"]
-            .rolling(50)
-            .mean()
-        )
+    hist["SMA200"] = (
+        hist["Close"]
+        .rolling(200)
+        .mean()
+    )
 
-        hist["SMA200"] = (
-            hist["Close"]
-            .rolling(200)
-            .mean()
-        )
+    current_price = (
+        hist["Close"]
+        .iloc[-1]
+    )
 
-        bb = BollingerBands(
-            hist["Close"]
-        )
+    current_rsi = (
+        hist["RSI"]
+        .dropna()
+        .iloc[-1]
+    )
 
-        hist["BB_UPPER"] = (
-            bb.bollinger_hband()
-        )
+    sma50 = (
+        hist["SMA50"]
+        .dropna()
+        .iloc[-1]
+    )
 
-        hist["BB_LOWER"] = (
-            bb.bollinger_lband()
-        )
-        current_price = (
-            hist["Close"]
-            .iloc[-1]
-        )
+    sma200 = (
+        hist["SMA200"]
+        .dropna()
+        .iloc[-1]
+    )
 
-        current_rsi = (
-            hist["RSI"]
-            .dropna()
-            .iloc[-1]
+    # =====================================
+    # FUNDAMENTALS
+    # =====================================
+
+    pe = clean(
+        info.get("trailingPE")
+    )
+
+    forward_pe = clean(
+        info.get("forwardPE")
+    )
+
+    peg = clean(
+        info.get("pegRatio")
+    )
+
+    ev_ebitda = clean(
+        info.get(
+            "enterpriseToEbitda"
         )
+    )
 
-        # FUNDAMENTALS
-
-        pe = clean(
-            info.get("trailingPE")
-        )
-
-        forward_pe = clean(
-            info.get("forwardPE")
-        )
-
-        peg = clean(
-            info.get("pegRatio")
-        )
-
-        ev_ebitda = clean(
+    roe = pct(
+        clean(
             info.get(
-                "enterpriseToEbitda"
+                "returnOnEquity"
             )
         )
+    )
 
-        roe = pct(
-            clean(
-                info.get(
-                    "returnOnEquity"
-                )
-            )
-        )
-
-        gross_margin = pct(
-            clean(
-                info.get(
-                    "grossMargins"
-                )
-            )
-        )
-
-        debt = clean(
+    revenue_growth = pct(
+        clean(
             info.get(
-                "debtToEquity"
+                "revenueGrowth"
             )
         )
+    )
 
-        roa = pct(
-            clean(
-                info.get(
-                    "returnOnAssets"
-                )
-            )
-        )
-
-        operating_margin = pct(
-            clean(
-                info.get(
-                    "operatingMargins"
-                )
-            )
-        )
-
-        net_margin = pct(
-            clean(
-               info.get(
-                   "profitMargins"
-               )
-            )
-        )
-
-        price_sales = clean(
+    earnings_growth = pct(
+        clean(
             info.get(
-                "priceToSalesTrailing12Months"
+                "earningsGrowth"
             )
         )
+    )
 
-        price_book = clean(
-            info.get(
-                "priceToBook"
-            )
+    debt = clean(
+        info.get(
+            "debtToEquity"
         )
+    )
 
-        current_ratio = clean(
-            info.get(
-                "currentRatio"
-            )
+    market_cap = clean(
+        info.get(
+            "marketCap"
         )
+    )
 
-        quick_ratio = clean(
-            info.get(
-                "quickRatio"
-            )
+    fcf = clean(
+        info.get(
+            "freeCashflow"
         )
+    )
 
-        dividend_yield = pct(
-            clean(
-                info.get(
-                    "dividendYield"
-                )
-            )
+    shares = clean(
+        info.get(
+            "sharesOutstanding"
         )
+    )
 
-        beta = clean(
-            info.get(
-                "beta"
-            )
-        )
+    fcf_yield = None
 
-        total_cash = clean(
-            info.get(
-                "totalCash"
-            )
-        )
+    if (
+        fcf
+        and market_cap
+    ):
 
-        total_debt = clean(
-            info.get(
-                "totalDebt"
-            )
-        )
-        market_cap = clean(
-            info.get(
-                "marketCap"
-            )
-        )
+        fcf_yield = (
+            fcf /
+            market_cap
+        ) * 100
 
-        revenue_growth = pct(
-            clean(
-                info.get(
-                    "revenueGrowth"
-                )
-            )
-        )
+    # =====================================
+    # DCF
+    # =====================================
 
-        earnings_growth = pct(
-            clean(
-                info.get(
-                    "earningsGrowth"
-                )
-            )
-        )
+    fair_value = dcf_value(
+        fcf,
+        shares,
+        growth,
+        discount,
+        terminal,
+        years
+    )
 
-        fcf = clean(
-            info.get(
-                "freeCashflow"
-            )
-        )
+    mos = None
 
-        shares = clean(
-            info.get(
-                "sharesOutstanding"
-            )
-        )
+    if fair_value:
 
-        fcf_yield = None
-
-        if (
-            fcf
-            and market_cap
-        ):
-
-            fcf_yield = (
-                fcf /
-                market_cap
-            ) * 100
-
-        # Buffett
-
-        buffett = 0
-
-        if roe and roe > 15:
-            buffett += 1
-
-        if gross_margin and gross_margin > 40:
-            buffett += 1
-
-        if debt and debt < 50:
-            buffett += 1
-
-        if revenue_growth and revenue_growth > 0:
-            buffett += 1
-
-        if fcf_yield and fcf_yield > 5:
-            buffett += 1
-
-        # Lynch
-
-        lynch = 0
-
-        if peg and peg < 1.5:
-            lynch += 1
-
-        if earnings_growth and earnings_growth > 15:
-            lynch += 1
-
-        if debt and debt < 100:
-            lynch += 1
-
-        # DCF
-
-        fair_value = dcf_model(
-            fcf,
-            shares,
-            growth,
-            discount,
-            terminal,
-            years
-        )
-
-        mos = None
-
-        if fair_value:
-
-            mos = (
-                (
-                    fair_value
-                    - current_price
-                )
-                /
+        mos = (
+            (
                 fair_value
-            ) * 100
-
-        # TOP METRICS
-
-        c1,c2,c3,c4 = st.columns(4)
-
-        c1.metric(
-            "Price",
-            f"${current_price:.2f}"
-        )
-
-        c2.metric(
-            "RSI",
-            f"{current_rsi:.1f}"
-        )
-
-        c3.metric(
-            "DCF",
-            (
-                f"${fair_value:.2f}"
-                if fair_value
-                else "N/A"
+                - current_price
             )
-        )
-
-        c4.metric(
-            "Margin Of Safety",
-            (
-                f"{mos:.1f}%"
-                if mos is not None
-                else "N/A"
-            )
-        )
-
-        # TABLE
-
-        df = pd.DataFrame({
-
-            "Metric":[
-
-                metrics = [
-
-            ("P/E", pe),
-            ("Forward P/E", forward_pe),
-            ("PEG", peg),
-            ("P/S", price_sales),
-            ("P/B", price_book),
-            ("EV/EBITDA", ev_ebitda),
-
-            ("ROE %", roe),
-            ("ROA %", roa),
-            ("ROIC %", roic),
-
-            ("Gross Margin %", gross_margin),
-            ("Operating Margin %", operating_margin),
-            ("Net Margin %", net_margin),
-
-            ("Revenue Growth %", revenue_growth),
-            ("Earnings Growth %", earnings_growth),
-
-            ("Debt/Equity", debt_equity),
-
-            ("Current Ratio", current_ratio),
-            ("Quick Ratio", quick_ratio),
-
-            ("FCF Yield %", fcf_yield),
-
-            ("Dividend Yield %", dividend_yield),
-
-            ("Beta", beta),
-
-            ("Volatility %", volatility),
-
-            ("Sharpe Ratio", sharpe_ratio),
-
-            ("Max Drawdown %", max_drawdown)
-
-]
-
-metrics_df = pd.DataFrame(
-    metrics,
-    columns=[
-        "Metric",
-        "Value"
-    ]
-)
-
-st.subheader(
-    "Full Analysis"
-)
-
-st.dataframe(
-    metrics_df,
-    use_container_width=True
-)
-            ],
-
-            "Value":[
-
-                show(pe),
-
-                show(forward_pe),
-
-                show(peg),
-
-                show(ev_ebitda),
-
-                show(roe,True),
-
-                show(
-                    revenue_growth,
-                    True
-                ),
-
-                show(
-                    earnings_growth,
-                    True
-                ),
-
-                show(
-                    fcf_yield,
-                    True
-                ),
-
-                show(
-                    debt,
-                    True
-                ),
-
-                human(
-                    market_cap
-                )
-
-            ]
-
-        })
-
-        st.subheader(
-            "Fundamentals"
-        )
-
-        st.dataframe(
-            df,
-            use_container_width=True
-        )
-
-        # SCORES
-
-        col1,col2 = st.columns(2)
-
-        col1.metric(
-            "Buffett",
-            f"{buffett}/5"
-        )
-
-        col2.metric(
-            "Lynch",
-            f"{lynch}/3"
-        )
-
-        # HEATMAP
-
-        if (
+            /
             fair_value
-            and shares
-        ):
+        ) * 100
 
-            growths = np.arange(
-                3,
-                16,
-                1
-            )
+    # =====================================
+    # BUFFETT
+    # =====================================
 
-            discounts = np.arange(
-                6,
-                16,
-                1
-            )
+    buffett = 0
 
-            matrix = []
+    if roe and roe > 15:
+        buffett += 1
 
-            for d in discounts:
+    if debt and debt < 50:
+        buffett += 1
 
-                row = []
+    if revenue_growth and revenue_growth > 0:
+        buffett += 1
 
-                for g in growths:
+    if fcf_yield and fcf_yield > 5:
+        buffett += 1
 
-                    value = dcf_model(
-                        fcf,
-                        shares,
-                        g,
-                        d,
-                        terminal,
-                        years
-                    )
+    # =====================================
+    # LYNCH
+    # =====================================
 
-                    row.append(
-                        value
-                    )
+    lynch = 0
 
-                matrix.append(
-                    row
+    if peg and peg < 1.5:
+        lynch += 1
+
+    if earnings_growth and earnings_growth > 15:
+        lynch += 1
+
+    if debt and debt < 100:
+        lynch += 1
+
+    # =====================================
+    # SCORE
+    # =====================================
+
+    score = 0
+
+    if pe:
+
+        if pe < 15:
+            score += 15
+
+        elif pe < 25:
+            score += 10
+
+    if forward_pe:
+
+        if forward_pe < 15:
+            score += 10
+
+        elif forward_pe < 25:
+            score += 5
+
+    if peg:
+
+        if peg < 1:
+            score += 10
+
+        elif peg < 1.5:
+            score += 5
+
+    if fcf_yield:
+
+        if fcf_yield > 8:
+            score += 15
+
+        elif fcf_yield > 5:
+            score += 10
+
+    if roe:
+
+        if roe > 20:
+            score += 10
+
+        elif roe > 15:
+            score += 5
+
+    if revenue_growth:
+
+        if revenue_growth > 15:
+            score += 10
+
+        elif revenue_growth > 10:
+            score += 5
+
+    if earnings_growth:
+
+        if earnings_growth > 15:
+            score += 10
+
+        elif earnings_growth > 10:
+            score += 5
+
+    if debt:
+
+        if debt < 50:
+            score += 10
+
+        elif debt < 100:
+            score += 5
+
+    if mos:
+
+        if mos > 30:
+            score += 20
+
+        elif mos > 20:
+            score += 15
+
+        elif mos > 10:
+            score += 10
+
+    score = min(
+        score,
+        100
+    )
+
+    # =====================================
+    # SIGNAL
+    # =====================================
+
+    if score >= 85:
+
+        signal = "🚀 STRONG BUY"
+
+    elif score >= 70:
+
+        signal = "✅ BUY"
+
+    elif score >= 55:
+
+        signal = "🟡 HOLD"
+
+    else:
+
+        signal = "🔴 AVOID"
+
+    if current_rsi > 70:
+
+        signal = "🔴 TAKE PROFITS"
+
+    # =====================================
+    # DASHBOARD
+    # =====================================
+
+    c1,c2,c3,c4,c5,c6 = st.columns(6)
+
+    c1.metric(
+        "Price",
+        f"${current_price:.2f}"
+    )
+
+    c2.metric(
+        "DCF",
+        (
+            f"${fair_value:.2f}"
+            if fair_value
+            else "N/A"
+        )
+    )
+
+    c3.metric(
+        "MOS",
+        (
+            f"{mos:.1f}%"
+            if mos is not None
+            else "N/A"
+        )
+    )
+
+    c4.metric(
+        "Score",
+        f"{score}/100"
+    )
+
+    c5.metric(
+        "Signal",
+        signal
+    )
+
+    c6.metric(
+        "Buffett",
+        f"{buffett}/4"
+    )
+
+    # =====================================
+    # TABLE
+    # =====================================
+
+    df = pd.DataFrame({
+
+        "Metric":[
+
+            "P/E",
+            "Forward P/E",
+            "PEG",
+            "EV/EBITDA",
+
+            "ROE",
+
+            "Revenue Growth",
+
+            "Earnings Growth",
+
+            "Debt/Equity",
+
+            "FCF Yield",
+
+            "Buffett",
+            "Lynch"
+
+        ],
+
+        "Value":[
+
+            show(pe),
+            show(forward_pe),
+            show(peg),
+            show(ev_ebitda),
+
+            show(
+                roe,
+                True
+            ),
+
+            show(
+                revenue_growth,
+                True
+            ),
+
+            show(
+                earnings_growth,
+                True
+            ),
+
+            show(debt),
+
+            show(
+                fcf_yield,
+                True
+            ),
+
+            f"{buffett}/4",
+            f"{lynch}/3"
+
+        ]
+
+    })
+
+    st.subheader(
+        "Fundamental Analysis"
+    )
+
+    st.dataframe(
+        df,
+        use_container_width=True
+    )
+
+    # =====================================
+    # DCF HEATMAP
+    # =====================================
+
+    if fair_value:
+
+        growths = np.arange(
+            3,
+            16,
+            1
+        )
+
+        discounts = np.arange(
+            6,
+            16,
+            1
+        )
+
+        matrix = []
+
+        for d in discounts:
+
+            row = []
+
+            for g in growths:
+
+                value = dcf_value(
+                    fcf,
+                    shares,
+                    g,
+                    d,
+                    terminal,
+                    years
                 )
 
-            heatmap = pd.DataFrame(
-                matrix,
-                index=
-                discounts,
-                columns=
-                growths
-            )
+                row.append(
+                    round(value,0)
+                    if value
+                    else np.nan
+                )
 
-            st.subheader(
-                "DCF Heatmap"
-            )
+            matrix.append(row)
 
-            fig = px.imshow(
-
-                heatmap,
-
-                text_auto=".0f",
-
-                aspect="auto",
-
-                color_continuous_scale="RdYlGn"
-
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
-
-        # PRICE CHART
+        heatmap = pd.DataFrame(
+            matrix,
+            index=[
+                f"{x}%"
+                for x in discounts
+            ],
+            columns=[
+                f"{x}%"
+                for x in growths
+            ]
+        )
 
         st.subheader(
-            "Price Chart"
+            "DCF Sensitivity Heatmap"
         )
 
-        fig = go.Figure()
-
-        fig.add_trace(
-
-            go.Scatter(
-
-                x=hist.index,
-
-                y=hist["Close"],
-
-                name="Price"
-
-            )
-
-        )
-
-        fig.add_trace(
-
-            go.Scatter(
-
-                x=hist.index,
-
-                y=hist["SMA50"],
-
-                name="SMA50"
-
-            )
-
-        )
-
-        fig.add_trace(
-
-            go.Scatter(
-
-                x=hist.index,
-
-                y=hist["SMA200"],
-
-                name="SMA200"
-
-            )
-
+        fig_heatmap = px.imshow(
+            heatmap,
+            text_auto=True,
+            aspect="auto",
+            color_continuous_scale="RdYlGn"
         )
 
         st.plotly_chart(
-            fig,
+            fig_heatmap,
             use_container_width=True
         )
 
-    except Exception as e:
+    # =====================================
+    # CHART
+    # =====================================
 
-        st.error(
-            str(e)
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=hist.index,
+            y=hist["Close"],
+            name="Price"
         )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=hist.index,
+            y=hist["SMA50"],
+            name="SMA50"
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=hist.index,
+            y=hist["SMA200"],
+            name="SMA200"
+        )
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+except Exception as e:
+
+    st.error(str(e))
