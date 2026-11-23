@@ -249,6 +249,10 @@ try:
         info.get("trailingPE")
     )
 
+    < 15      отлично
+    15-25     нормально
+    25-35     дорого
+    > 35      очень дорого
     forward_pe = clean(
         info.get("forwardPE")
     )
