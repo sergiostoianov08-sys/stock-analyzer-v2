@@ -253,6 +253,7 @@ try:
     15-25     нормально
     25-35     дорого
     > 35      очень дорого
+        
     forward_pe = clean(
         info.get("forwardPE")
     )
